@@ -2,7 +2,7 @@ from langchain_ollama import OllamaLLM
 import json
 import re
 
-llm = OllamaLLM(model="llama3")
+llm = OllamaLLM(model="llama3",temperature=0)
 
 def evaluation_agent(market, competitor, feasibility, business):
 
