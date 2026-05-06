@@ -1,7 +1,7 @@
 from langchain_ollama import OllamaLLM
 import json
 
-llm = OllamaLLM(model="llama3")
+llm = OllamaLLM(model="llama3",temperature=0)
 
 def market_agent(context):
 

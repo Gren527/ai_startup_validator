@@ -9,29 +9,65 @@ st.set_page_config(page_title="AI Startup Validator", layout="wide")
 st.markdown("""
 <style>
 .big-title {
-    font-size: 44px;
+    font-size: 48px;
     font-weight: 800;
     background: linear-gradient(90deg, #00C9FF, #92FE9D);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
-.card {
+.section {
     background: #111;
-    padding: 18px;
-    border-radius: 12px;
+    padding: 20px;
+    border-radius: 14px;
     border: 1px solid #222;
-    margin-bottom: 15px;
+    margin-bottom: 20px;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------- HEADER ----------
 st.markdown('<div class="big-title">🚀 AI Startup Validator</div>', unsafe_allow_html=True)
-st.write("Analyze your startup idea using AI agents")
+st.caption("Evaluate your startup idea like an investor")
+
 st.divider()
 
-# ---------- INPUT ----------
-idea = st.text_area("Enter your startup idea")
+# ---------- INPUT FORM ----------
+st.subheader("🧠 Startup Details")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    idea = st.text_area("💡 Startup Idea", placeholder="Explain what your startup does")
+
+    problem = st.text_area(
+        "⚠️ Problem Statement",
+        placeholder="What problem are you solving?"
+    )
+
+with col2:
+    stage = st.selectbox(
+        "📍 Startup Stage",
+        [
+            "Just an idea",
+            "Research phase",
+            "Building MVP",
+            "Early users",
+            "Scaling",
+            "Revenue generating"
+        ]
+    )
+
+    target_users = st.text_input(
+        "🎯 Target Users",
+        placeholder="Students, businesses, developers..."
+    )
+
+value = st.text_area(
+    "🚀 Unique Value Proposition",
+    placeholder="What makes your idea different?"
+)
+
+st.divider()
 
 # ---------- RADAR ----------
 def radar(result):
@@ -52,20 +88,31 @@ def radar(result):
     st.plotly_chart(fig, use_container_width=True)
 
 # ---------- RUN ----------
-if st.button("Validate Startup Idea"):
+if st.button("🚀 Validate Startup Idea"):
 
     if not idea.strip():
-        st.warning("Enter idea")
+        st.warning("Please enter your startup idea")
         st.stop()
 
+    # 🔥 structured input (BIG upgrade)
+    user_input = f"""
+    Idea: {idea}
+    Stage: {stage}
+    Target Users: {target_users}
+    Problem: {problem}
+    Unique Value: {value}
+    """
+
     try:
-        with st.spinner("Analyzing..."):
-            result = run_startup_validator(idea)
+        with st.spinner("🤖 AI agents analyzing your startup..."):
+            result = run_startup_validator(user_input)
     except Exception as e:
         st.error(f"Error: {e}")
         st.stop()
 
-    st.success("Analysis Complete")
+    st.success("✅ Analysis Complete")
+
+    st.markdown(f"### 📍 Startup Stage: **{stage}**")
 
     col1, col2 = st.columns(2)
 
@@ -74,7 +121,7 @@ if st.button("Validate Startup Idea"):
         m = result.get("market_analysis", {})
 
         st.markdown(f"""
-        <div class="card">
+        <div class="section">
         <h3>📊 Market</h3>
         {m.get('target_users','Not available')}<br>
         Demand: {m.get('market_demand','N/A')}<br>
@@ -88,7 +135,7 @@ if st.button("Validate Startup Idea"):
         f = result.get("feasibility_analysis", {})
 
         st.markdown(f"""
-        <div class="card">
+        <div class="section">
         <h3>⚙️ Feasibility</h3>
         {f.get('technologies','N/A')}<br>
         Complexity: {f.get('complexity','N/A')}<br>
@@ -104,7 +151,7 @@ if st.button("Validate Startup Idea"):
         comp = ", ".join(c.get("competitors", [])) if c.get("competitors") else "Not found"
 
         st.markdown(f"""
-        <div class="card">
+        <div class="section">
         <h3>🏢 Competitors</h3>
         {comp}<br>
         Features: {c.get('features','N/A')}
@@ -116,7 +163,7 @@ if st.button("Validate Startup Idea"):
         b = result.get("business_model", {})
 
         st.markdown(f"""
-        <div class="card">
+        <div class="section">
         <h3>💰 Business</h3>
         Revenue: {b.get('revenue_model','N/A')}<br>
         Pricing: {b.get('pricing_strategy','N/A')}<br>
@@ -130,7 +177,7 @@ if st.button("Validate Startup Idea"):
     i = result.get("innovation_analysis", {})
 
     st.markdown(f"""
-    <div class="card">
+    <div class="section">
     <h3>🚀 Innovation</h3>
     {i.get('reason','N/A')}
     </div>
