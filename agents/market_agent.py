@@ -1,13 +1,20 @@
 from langchain_ollama import OllamaLLM
+from rag_fetcher import fetch_rag_context, inject_rag
 import json
 
-llm = OllamaLLM(model="llama3",temperature=0)
+llm = OllamaLLM(model="llama3", temperature=0)
 
 def market_agent(context):
 
     idea = context["idea"]
 
-    prompt = f"""
+    # ── RAG: fetch real-world market context ──────────────────────────────
+    # Query is intentionally broad to get industry-level data
+    rag_query = f"market size industry trends {idea}"
+    rag_context = fetch_rag_context(rag_query)
+    # ─────────────────────────────────────────────────────────────────────
+
+    base_prompt = f"""
 Analyze the market potential for this startup idea.
 
 Idea: {idea}
@@ -29,6 +36,10 @@ FORMAT:
 }}
 """
 
+    # ── Inject RAG if available, else use base prompt as-is ───────────────
+    prompt = inject_rag(base_prompt, rag_context)
+    print(rag_context)
+    
     response = llm.invoke(prompt).strip()
 
     # 🔥 Clean markdown
@@ -38,7 +49,6 @@ FORMAT:
     try:
         data = json.loads(response)
 
-        # 🔥 Ensure ALL keys exist (VERY IMPORTANT)
         return {
             "target_users": data.get("target_users", "Not identified"),
             "market_demand": data.get("market_demand", "Unknown"),
@@ -48,7 +58,6 @@ FORMAT:
         }
 
     except:
-        # 🔥 STRONG fallback (never empty)
         return {
             "target_users": "Not identified",
             "market_demand": "Unknown",
