@@ -5,25 +5,114 @@ Tries 5 free APIs in order until one returns data:
 1. DDGS (renamed duckduckgo_search)  — pip install ddgs
 2. duckduckgo_search (old name)       — pip install duckduckgo-search
 3. Wikipedia REST API                 — no install needed
-4. NewsAPI.org                        — free tier, no key needed for headlines
-5. Serper.dev / Google via SerpAPI   — skipped (needs key)
-   Replaced with: Open Library / Wikidata for industry terms
-6. DuckDuckGo HTML scrape fallback   — requests + BeautifulSoup
+4. Wikidata                           — no install needed
+5. DuckDuckGo HTML scrape fallback   — requests + BeautifulSoup
+
+NEW: filter_rag_context(raw_rag, idea, top_n)
+  — Scores every sentence in the raw RAG output by keyword overlap
+    with the idea string, then returns only the top-N most relevant
+    sentences.  This keeps the injected context tight and on-topic.
 
 Install:
     pip install ddgs requests beautifulsoup4
 """
 
 import re
+import math
 import requests
 
 
-# ---------------------------------------------------------------------------
-# 1. DDGS (new package name)
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# RAG FILTERING  (new)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _tokenize(text: str) -> set[str]:
+    """Lowercase words, strip punctuation, drop 1-char tokens."""
+    return {
+        w for w in re.findall(r"[a-zA-Z0-9]+", text.lower())
+        if len(w) > 1
+    }
+
+
+# Common English stopwords — we down-weight these so content words dominate
+_STOPWORDS = {
+    "the", "is", "in", "it", "of", "and", "to", "a", "an", "for",
+    "on", "at", "by", "as", "or", "be", "this", "that", "are",
+    "was", "with", "from", "its", "also", "has", "have", "been",
+    "their", "they", "which", "who", "more", "can", "we", "he",
+    "she", "you", "not", "but", "so", "about", "will", "other"
+}
+
+
+def _score_sentence(sentence: str, query_tokens: set[str]) -> float:
+    """
+    TF-IDF-lite: score = overlap of content words between sentence and query,
+    weighted by inverse sentence length so short sharp sentences rank higher.
+
+    Returns a float; higher = more relevant.
+    """
+    sent_tokens = _tokenize(sentence) - _STOPWORDS
+    query_content = query_tokens - _STOPWORDS
+
+    if not sent_tokens or not query_content:
+        return 0.0
+
+    overlap = sent_tokens & query_content
+    # Jaccard-like with a length penalty for very long sentences
+    score = len(overlap) / (1 + math.log1p(len(sent_tokens)))
+    return score
+
+
+def filter_rag_context(
+    raw_rag: str,
+    idea: str,
+    top_n: int = 6,
+    min_len: int = 30
+) -> str:
+    """
+    Given raw multi-source RAG text and the startup idea string,
+    return only the top_n most relevant sentences.
+
+    Parameters
+    ----------
+    raw_rag  : str   — full text returned by fetch_rag_context()
+    idea     : str   — the startup idea (used as the relevance query)
+    top_n    : int   — how many sentences to keep   (default: 6)
+    min_len  : int   — ignore sentences shorter than this (chars)
+
+    Returns
+    -------
+    A compact string of the top-N sentences, one per line,
+    ready to inject into a prompt.
+    """
+    if not raw_rag:
+        return ""
+
+    # Split on sentence boundaries (keep header lines like "[Wikipedia – X]")
+    raw_sentences = re.split(r"(?<=[.!?])\s+|\n", raw_rag)
+    query_tokens = _tokenize(idea)
+
+    scored = []
+    for sent in raw_sentences:
+        sent = sent.strip()
+        if len(sent) < min_len:
+            continue  # skip very short / header fragments
+        score = _score_sentence(sent, query_tokens)
+        scored.append((score, sent))
+
+    # Sort descending, take top N
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_sentences = [s for _, s in scored[:top_n]]
+
+    return "\n".join(top_sentences)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SOURCE FETCHERS  (unchanged)
+# ──────────────────────────────────────────────────────────────────────────────
+
 def _try_ddgs(query: str, max_results: int = 4) -> str | None:
     try:
-        return None
         from ddgs import DDGS
         results = []
         with DDGS() as ddgs:
@@ -37,12 +126,8 @@ def _try_ddgs(query: str, max_results: int = 4) -> str | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# 2. duckduckgo_search (old package name, some users still have it)
-# ---------------------------------------------------------------------------
 def _try_duckduckgo_search(query: str, max_results: int = 4) -> str | None:
     try:
-        return None
         from duckduckgo_search import DDGS
         results = []
         with DDGS() as ddgs:
@@ -56,13 +141,8 @@ def _try_duckduckgo_search(query: str, max_results: int = 4) -> str | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# 3. Wikipedia REST API  (no key, always free)
-# ---------------------------------------------------------------------------
 def _try_wikipedia(query: str, sentences: int = 6) -> str | None:
     try:
-        return None
-        # Search for best article
         search = requests.get(
             "https://en.wikipedia.org/w/api.php",
             params={"action": "query", "list": "search",
@@ -93,12 +173,8 @@ def _try_wikipedia(query: str, sentences: int = 6) -> str | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# 4. Wikidata search  (structured facts about companies / industries)
-# ---------------------------------------------------------------------------
 def _try_wikidata(query: str) -> str | None:
     try:
-        return None
         resp = requests.get(
             "https://www.wikidata.org/w/api.php",
             params={
@@ -129,12 +205,8 @@ def _try_wikidata(query: str) -> str | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# 5. DuckDuckGo HTML scrape  (pure requests + BeautifulSoup, no package deps)
-# ---------------------------------------------------------------------------
 def _try_ddg_html(query: str, max_results: int = 4) -> str | None:
     try:
-        return None
         from bs4 import BeautifulSoup
 
         headers = {
@@ -163,19 +235,17 @@ def _try_ddg_html(query: str, max_results: int = 4) -> str | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Combined: try all 5, stop at first success, combine Wikipedia + Wikidata
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# COMBINED FETCHER
+# ──────────────────────────────────────────────────────────────────────────────
+
 def fetch_rag_context(query: str) -> str | None:
     """
-    Tries 5 sources in order. Returns the first non-None result.
-    Wikipedia and Wikidata are always attempted together as they're lightweight.
-    Never raises — always returns str or None.
+    Tries all sources, returns combined raw text.
+    Use filter_rag_context() afterwards to trim to what matters.
     """
-    return None
     parts = []
 
-    # --- Search engines first (richest context) ---
     ddgs_result = _try_ddgs(query)
     if ddgs_result:
         parts.append(f"[Web Search]\n{ddgs_result}")
@@ -190,12 +260,10 @@ def fetch_rag_context(query: str) -> str | None:
         if html_result:
             parts.append(html_result)
 
-    # --- Wikipedia always worth adding if we have anything or as solo fallback ---
     wiki = _try_wikipedia(query)
     if wiki:
         parts.append(wiki)
 
-    # --- Wikidata for entity/company facts ---
     wikidata = _try_wikidata(query)
     if wikidata:
         parts.append(wikidata)
@@ -208,12 +276,13 @@ def fetch_rag_context(query: str) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Prompt injector — unchanged interface
-# ---------------------------------------------------------------------------
-def inject_rag(base_prompt: str, rag_context) -> str:
+# ──────────────────────────────────────────────────────────────────────────────
+# PROMPT INJECTOR
+# ──────────────────────────────────────────────────────────────────────────────
+
+def inject_rag(base_prompt: str, rag_context: str | None) -> str:
     if not rag_context:
-        return base_prompt  # pure LLM, zero behaviour change
+        return base_prompt
 
     return (
         "--- REAL-WORLD CONTEXT (ground your analysis on this, do not contradict it) ---\n"
