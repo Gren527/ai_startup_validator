@@ -1,13 +1,21 @@
 from langchain_ollama import OllamaLLM
+from rag_fetcher import fetch_rag_context, filter_rag_context, inject_rag
 import json
 
-llm = OllamaLLM(model="llama3",temperature=0)
+llm = OllamaLLM(model="llama3", temperature=0)
+
 
 def market_agent(context):
 
     idea = context["idea"]
 
-    prompt = f"""
+    # ── RAG: fetch → filter to top 6 most relevant sentences ─────────────
+    rag_query   = f"market size industry trends {idea}"
+    raw_rag     = fetch_rag_context(rag_query)
+    rag_context = filter_rag_context(raw_rag, idea, top_n=6)   # ← NEW
+    # ─────────────────────────────────────────────────────────────────────
+
+    base_prompt = f"""
 Analyze the market potential for this startup idea.
 
 Idea: {idea}
@@ -29,30 +37,28 @@ FORMAT:
 }}
 """
 
+    prompt = inject_rag(base_prompt, rag_context)
+    print("[market_agent] filtered RAG context:\n", rag_context)
+
     response = llm.invoke(prompt).strip()
 
-    # 🔥 Clean markdown
     if response.startswith("```"):
         response = response.replace("```json", "").replace("```", "").strip()
 
     try:
         data = json.loads(response)
-
-        # 🔥 Ensure ALL keys exist (VERY IMPORTANT)
         return {
-            "target_users": data.get("target_users", "Not identified"),
-            "market_demand": data.get("market_demand", "Unknown"),
-            "market_size": data.get("market_size", "Unknown"),
+            "target_users":    data.get("target_users", "Not identified"),
+            "market_demand":   data.get("market_demand", "Unknown"),
+            "market_size":     data.get("market_size", "Unknown"),
             "industry_growth": data.get("industry_growth", "Unknown"),
-            "score": float(data.get("score", 5))
+            "score":           float(data.get("score", 5))
         }
-
-    except:
-        # 🔥 STRONG fallback (never empty)
+    except Exception:
         return {
-            "target_users": "Not identified",
-            "market_demand": "Unknown",
-            "market_size": "Unknown",
+            "target_users":    "Not identified",
+            "market_demand":   "Unknown",
+            "market_size":     "Unknown",
             "industry_growth": "Unknown",
-            "score": 5
+            "score":           5
         }

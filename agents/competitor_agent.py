@@ -1,8 +1,8 @@
 from langchain_ollama import OllamaLLM
+from rag_fetcher import fetch_rag_context, filter_rag_context, inject_rag
 import json
 import re
 
-# 🔥 Use low randomness for consistency
 llm = OllamaLLM(model="llama3", temperature=0)
 
 
@@ -10,7 +10,13 @@ def competitor_agent(context):
 
     idea = context["idea"]
 
-    prompt = f"""
+    # ── RAG: fetch → filter to top 5 most relevant sentences ─────────────
+    rag_query   = f"top competitors companies {idea}"
+    raw_rag     = fetch_rag_context(rag_query)
+    rag_context = filter_rag_context(raw_rag, idea, top_n=5)   # ← NEW
+    # ─────────────────────────────────────────────────────────────────────
+
+    base_prompt = f"""
 You are a startup analyst.
 
 Find REAL competitors for this startup idea.
@@ -37,28 +43,23 @@ FORMAT:
 }}
 """
 
-    # 🔁 Retry mechanism
+    prompt = inject_rag(base_prompt, rag_context)
+    print("[competitor_agent] filtered RAG context:\n", rag_context)
+
     for _ in range(3):
 
         response = llm.invoke(prompt).strip()
-
-        # 🔥 Remove markdown if present
         response = re.sub(r"```json|```", "", response).strip()
-
-        # 🔥 Extract JSON block
-        match = re.search(r"\{.*\}", response, re.DOTALL)
+        match    = re.search(r"\{.*\}", response, re.DOTALL)
 
         if match:
             try:
                 data = json.loads(match.group(0))
 
-                # ✅ Validate competitors
                 competitors = data.get("competitors", [])
-
                 if not competitors or len(competitors) < 1:
-                    continue  # retry if empty
+                    continue
 
-                # ✅ Normalize score
                 score = data.get("score", 5)
                 if isinstance(score, (int, float)):
                     if score > 10:
@@ -67,17 +68,15 @@ FORMAT:
                     score = 5
 
                 data["score"] = round(score, 2)
-
                 return data
 
-            except:
-                continue  # retry if parsing fails
+            except Exception:
+                continue
 
-    # 🔥 Smart fallback (never broken UI)
     return {
         "competitors": ["Generic competitors in this domain"],
-        "features": "Common features in similar platforms",
-        "strengths": "Established players with user base",
-        "weaknesses": "High competition and low differentiation",
-        "score": 6
+        "features":    "Common features in similar platforms",
+        "strengths":   "Established players with user base",
+        "weaknesses":  "High competition and low differentiation",
+        "score":       6
     }
